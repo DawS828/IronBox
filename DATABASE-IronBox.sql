@@ -1,5 +1,4 @@
 CREATE DATABASE IronBox;
-USE IronBox;
 
 -- Table des Techniciens
 CREATE TABLE Technicien (
