@@ -1,0 +1,266 @@
+<?php
+session_start();
+include 'connexion.php';
+
+if (!isset($_SESSION['TechID'])) {
+    echo '<div class="alert alert-danger text-center mt-5">Accès refusé.</div>';
+    exit();
+}
+
+$techID = $_SESSION['TechID'];
+$adminCheck = $bdd->prepare("SELECT * FROM Technicien WHERE TechnicienID = ? AND TechRole = 'Admin'");
+$adminCheck->execute([$techID]);
+
+$isAdmin = $adminCheck->rowCount() > 0;
+
+if (!$isAdmin) {
+    echo '<div class="alert alert-danger text-center mt-5">Accès réservé aux administrateurs.</div>';
+    exit();
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Ajout stock
+    if (isset($_POST['ajouter_stock'])) {
+        $casierID = $_POST['casierID'];
+        $quantite = $_POST['quantite'];
+
+        $stmt = $bdd->prepare("SELECT MaterielID FROM Contenir WHERE CasierID = ?");
+        $stmt->execute([$casierID]);
+        $result = $stmt->fetch();
+
+        if ($result) {
+            $materielID = $result['MaterielID'];
+            $bdd->prepare("UPDATE Materiel SET Quantite = Quantite + ? WHERE MaterielID = ?")->execute([$quantite, $materielID]);
+            $bdd->prepare("UPDATE Casier SET CasierQte = CasierQte + ? WHERE CasierID = ?")->execute([$quantite, $casierID]);
+            $bdd->prepare("INSERT INTO Historique (HistoriqueDate, HistoriqueHeure, HistoriqueTypeEvent, badge, TechID)
+                VALUES (CURDATE(), CURTIME(), ?, ?, ?)")->execute(['Ajout matériel - Casier ' . $casierID, $_SESSION['TechBadge'], $techID]);
+        }
+    }
+
+    // Ajout technicien
+    if (isset($_POST['ajouter_technicien'])) {
+        $nom = $_POST['tech_nom'];
+        $prenom = $_POST['tech_prenom'];
+        $role = $_POST['tech_role'];
+        $badge = $_POST['tech_badge'];
+        $mdp = password_hash($_POST['tech_password'], PASSWORD_DEFAULT);
+
+        $bdd->prepare("INSERT INTO Technicien (TechNom, TechPrenom, TechRole, TechBadge, TechPassword)
+            VALUES (?, ?, ?, ?, ?)")->execute([$nom, $prenom, $role, $badge, $mdp]);
+    }
+
+    // Gestion des accès casiers
+    if (isset($_POST['set_acces'])) {
+        $tech_id = $_POST['access_tech_id'];
+        $access_casiers = $_POST['access_casiers'] ?? [];
+
+        $bdd->prepare("DELETE FROM Acceder WHERE TechnicienID = ?")->execute([$tech_id]);
+
+        foreach ($access_casiers as $casier_id) {
+            $bdd->prepare("INSERT INTO Acceder (TechnicienID, CasierID) VALUES (?, ?)")->execute([$tech_id, $casier_id]);
+        }
+    }
+
+    // Ouvrir tous les casiers
+    if (isset($_POST['ouvrir_tous'])) {
+        $output = shell_exec("sudo /home/pi/init/imp.sh 2>&1");
+
+        $bdd->prepare("INSERT INTO Historique (HistoriqueDate, HistoriqueHeure, HistoriqueTypeEvent, badge, TechID)
+            VALUES (CURDATE(), CURTIME(), ?, ?, ?)")
+            ->execute(['Ouverture de tous les casiers', $_SESSION['TechBadge'], $techID]);
+
+        echo '<div class="alert alert-success text-center mt-3">Tous les casiers ont été ouverts.</div>';
+    }
+}
+
+$casiers = $bdd->query("SELECT CasierID, CasierType FROM Casier ORDER BY CasierID")->fetchAll();
+$techs = $bdd->query("SELECT TechnicienID, TechPrenom, TechNom FROM Technicien ORDER BY TechPrenom")->fetchAll();
+?>
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin - IronBox</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background-color: #f5f7fa; padding: 30px; }
+    .main-container { display: flex; flex-wrap: wrap; gap: 30px; justify-content: center; margin-top: 20px; }
+    .form-container, .rfid-container { background-color: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+    .form-container { max-width: 600px; width: 100%; }
+    .rfid-container { width: 300px; }
+    .logout-btn { position: absolute; top: 20px; right: 30px; }
+  </style>
+</head>
+<body>
+
+<a href="logout.php" class="btn btn-outline-danger logout-btn">Déconnexion</a>
+
+<div class="main-container">
+  <!-- RFID -->
+  <div class="rfid-container">
+    <h5 class="text-center mb-3">Lecteur RFID</h5>
+    <div id="badge-info" class="alert alert-secondary text-center">En attente de scan...</div>
+  </div>
+
+  <!-- Ajout Stock -->
+  <div class="form-container">
+    <h4 class="mb-4">Ajout de Stock</h4>
+    <form method="POST">
+      <div class="mb-3">
+        <label for="casierID" class="form-label">Casier</label>
+        <select name="casierID" id="casierID" class="form-select" required>
+          <?php foreach ($casiers as $casier): ?>
+            <option value="<?= $casier['CasierID'] ?>">#<?= $casier['CasierID'] ?> - <?= $casier['CasierType'] ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label for="quantite" class="form-label">Quantité</label>
+        <input type="number" name="quantite" class="form-control" required>
+      </div>
+      <button type="submit" name="ajouter_stock" class="btn btn-success w-100">Ajouter</button>
+    </form>
+  </div>
+
+  <!-- Ajout Technicien -->
+  <div class="form-container">
+    <h4 class="mb-4">Ajout de Technicien</h4>
+    <form method="POST">
+      <div class="mb-3"><input name="tech_nom" class="form-control" placeholder="Nom" required></div>
+      <div class="mb-3"><input name="tech_prenom" class="form-control" placeholder="Prénom" required></div>
+      <div class="mb-3">
+        <select name="tech_role" class="form-select" required>
+          <option value="Admin">Admin</option>
+          <option value="Technicien">Technicien</option>
+        </select>
+      </div>
+      <div class="mb-3"><input name="tech_badge" class="form-control" placeholder="Badge ID" required></div>
+      <div class="mb-3"><input type="password" name="tech_password" class="form-control" placeholder="Mot de passe" required></div>
+      <button type="submit" name="ajouter_technicien" class="btn btn-primary w-100">Ajouter le technicien</button>
+    </form>
+  </div>
+
+  <!-- Gestion accès casiers -->
+  <div class="form-container">
+    <h4 class="mb-4">Accès Casier - Technicien</h4>
+    <form method="POST">
+      <div class="mb-3">
+        <label class="form-label">Technicien</label>
+        <select name="access_tech_id" class="form-select" required>
+          <?php foreach ($techs as $tech): ?>
+            <option value="<?= $tech['TechnicienID'] ?>"><?= $tech['TechPrenom'] . ' ' . $tech['TechNom'] ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Casiers autorisés</label>
+        <?php foreach ($casiers as $casier): ?>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="access_casiers[]" value="<?= $casier['CasierID'] ?>" id="casier<?= $casier['CasierID'] ?>">
+            <label class="form-check-label" for="casier<?= $casier['CasierID'] ?>">
+              #<?= $casier['CasierID'] ?> - <?= $casier['CasierType'] ?>
+            </label>
+          </div>
+        <?php endforeach; ?>
+      </div>
+
+      <button type="submit" name="set_acces" class="btn btn-warning w-100">Mettre à jour les accès</button>
+    </form>
+  </div>
+</div>
+
+<!-- Bouton pour ouvrir tous les casiers -->
+<div class="container mt-5 text-center">
+  <form method="POST">
+    <button type="submit" name="ouvrir_tous" class="btn btn-danger btn-lg" onclick="return confirm('Confirmer l\'ouverture de tous les casiers ?');">
+      🔓 Ouvrir Tous les Casiers
+    </button>
+  </form>
+</div>
+
+<!-- Historique -->
+<div class="container mt-5">
+  <h4 class="text-center mb-4">Historique en Temps Réel</h4>
+  <table class="table table-bordered table-hover bg-white shadow-sm">
+    <thead class="table-dark">
+      <tr>
+        <th>Date</th>
+        <th>Heure</th>
+        <th>Évènement</th>
+        <th>Badge</th>
+        <th>Technicien</th>
+      </tr>
+    </thead>
+    <tbody id="historique-body"></tbody>
+  </table>
+</div>
+
+<!-- Liste des accès -->
+<div class="container mt-5">
+  <h4 class="text-center mb-4">Accès des Techniciens aux Casiers</h4>
+  <table class="table table-bordered table-striped">
+    <thead class="table-dark">
+      <tr>
+        <th>Technicien</th>
+        <th>Casiers autorisés</th>
+      </tr>
+    </thead>
+    <tbody>
+      <?php
+      foreach ($techs as $tech) {
+          $access = $bdd->prepare("SELECT C.CasierType FROM Acceder A JOIN Casier C ON A.CasierID = C.CasierID WHERE A.TechnicienID = ?");
+          $access->execute([$tech['TechnicienID']]);
+          $casiers_autorises = $access->fetchAll(PDO::FETCH_COLUMN);
+
+          echo "<tr><td>{$tech['TechPrenom']} {$tech['TechNom']}</td>";
+          echo "<td>" . (empty($casiers_autorises) ? "<i>Aucun accès</i>" : implode(', ', $casiers_autorises)) . "</td></tr>";
+      }
+      ?>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  setInterval(() => {
+    fetch('badge.json')
+      .then(res => res.json())
+      .then(data => {
+        const badge = data.badge || "Aucun";
+        document.getElementById('badge-info').textContent = "Badge scanné : " + badge;
+      })
+      .catch(() => {
+        document.getElementById('badge-info').textContent = "Erreur de lecture.";
+      });
+  }, 1000);
+
+  async function fetchHistorique() {
+    try {
+      const res = await fetch('fetch_historique.php');
+      const data = await res.json();
+      const tbody = document.getElementById('historique-body');
+      tbody.innerHTML = '';
+
+      data.forEach(item => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${item.HistoriqueDate}</td>
+          <td>${item.HistoriqueHeure}</td>
+          <td>${item.HistoriqueTypeEvent}</td>
+          <td>${item.badge ?? '-'}</td>
+          <td>${item.TechPrenom ? item.TechPrenom + ' ' + item.TechNom : '-'}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    } catch (err) {
+      console.error("Erreur de chargement :", err);
+    }
+  }
+
+  setInterval(fetchHistorique, 5000);
+  fetchHistorique();
+</script>
+
+</body>
+</html>
