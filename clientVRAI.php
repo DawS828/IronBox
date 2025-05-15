@@ -1,33 +1,33 @@
 <?php
 session_start();
 include 'connexion.php';
-require 'vendor/autoload.php'; // Inclure l'autoloader de Composer
+require 'vendor/autoload.php'; // Inclure l'autoloader de Composer POur les mqils
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
-// Fichier contenant le badge du technicien
-//$badge_file = 'badge.json';
+  //Fichier contenant le badge du technicien
+$badge_file = 'badge.json';
 
-// Vérification de l'existence du fichier badge.json
-//if (file_exists($badge_file)) {
-    // Lecture et décodage du fichier JSON
-  //  $json = json_decode(file_get_contents($badge_file), true);
-    //$badge = $json['badge'] ?? null;
+//Vérification de l'existence du fichier badge.json
+if (file_exists($badge_file)) {
+    //  Lecture et décodage du fichier JSON
+    $json = json_decode(file_get_contents($badge_file), true);
+    $badge = $json['badge'] ?? null;
 
-    // Si un badge est trouvé, recherche du technicien correspondant dans la base de données
-    //if ($badge) {
-        $stmt = $bdd->prepare("SELECT * FROM Technicien WHERE TechBadge = 4049634572972872515");
+         // Si un badge est trouvé, recherche du technicien correspondant dans la base de données
+    if ($badge) {
+        $stmt = $bdd->prepare("SELECT * FROM Technicien WHERE TechBadge = ?");
         $stmt->execute([$badge]);
         $tech = $stmt->fetch();
 
-        // Si le technicien est trouvé, stockage de ses informations dans la session
+                  // Si le technicien est trouvé, stockage de ses informations dans la session
         if ($tech) {
             $_SESSION['client_id'] = $tech['TechnicienID'];
             $_SESSION['client_nom'] = $tech['TechPrenom'] . ' ' . $tech['TechNom'];
-      //      unlink($badge_file); // Suppression du fichier badge.json
-      //  }
-    //}
+            unlink($badge_file); // Suppression du fichier badge.json
+        }
+    }
 }
 
 // Redirection vers la page de connexion si l'utilisateur n'est pas connecté
@@ -169,7 +169,7 @@ $casierList = $casiers->fetchAll();
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>IronBox - BONJOUR Accès</title>
+  <title>IronBox - Accès</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
